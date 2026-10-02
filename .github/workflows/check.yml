@@ -1,0 +1,36 @@
+name: Check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Build the image
+        # The client build runs the TypeScript check first (npm run build).
+        run: docker build -t discord-activity-starter:test .
+      - name: Image size
+        # The README says the free plan is enough. Print the number that claim
+        # rests on, and fail when a change pushes the image past the free
+        # plan's image size (FREE_IMAGE_BYTES, as published in
+        # https://dockhold.eu/llms.txt on 2026-10-01). docker image inspect
+        # reports the uncompressed size; the gzip of a docker save is a close
+        # estimate of the compressed image size the free plan counts.
+        env:
+          FREE_IMAGE_BYTES: "300000000"
+        run: |
+          uncompressed=$(docker image inspect discord-activity-starter:test --format '{{.Size}}')
+          compressed=$(docker save discord-activity-starter:test | gzip -9 | wc -c)
+          echo "uncompressed: $((uncompressed / 1048576)) MiB ($uncompressed bytes)"
+          echo "compressed (docker save | gzip -9): $((compressed / 1048576)) MiB ($compressed bytes)"
+          if [ "$compressed" -gt "$FREE_IMAGE_BYTES" ]; then
+            echo "::error::compressed image is over FREE_IMAGE_BYTES; the README's free-plan line is no longer true"
+            exit 1
+          fi
+      - name: Smoke test
+        # Unit tests inside the image, then the image run as uid 1001 with
+        # every capability dropped, a fixed PORT and no outbound network.
+        run: tests/smoke.sh discord-activity-starter:test
